@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 struct VoiceRosterView: View {
@@ -37,6 +38,8 @@ struct VoiceRosterView: View {
         HStack {
             Spacer()
             Button {
+                NSApp.setActivationPolicy(.regular)
+                NSApp.activate(ignoringOtherApps: true)
                 openWindow(id: "voice-manager")
             } label: {
                 Label("Manage…", systemImage: "slider.horizontal.3")

@@ -75,6 +75,13 @@ struct VoiceManagerView: View {
         .task {
             await viewModel.refreshVoices()
         }
+        .onAppear {
+            NSApp.setActivationPolicy(.regular)
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        .onDisappear {
+            NSApp.setActivationPolicy(.accessory)
+        }
     }
 
     // MARK: - List
