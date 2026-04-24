@@ -158,10 +158,10 @@ struct VoiceManagerView: View {
     }
 
     private func copyRegenerateCommand(for voice: Voice) {
-        let command = "/generate-voice-portrait \(voice.name)"
+        let instruction = "Regenerate voice portraits for the \"\(voice.name)\" voice. Use the generate-voice-portrait skill (nested under the speak skill). name: \(voice.name); style: \(voice.style); kind: \(voice.kind)."
         NSPasteboard.general.clearContents()
-        NSPasteboard.general.setString(command, forType: .string)
-        showToast("Copied: \(command)")
+        NSPasteboard.general.setString(instruction, forType: .string)
+        showToast("Copied regenerate instructions for \(voice.name)")
     }
 
     private func showToast(_ message: String) {
