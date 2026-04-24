@@ -1151,13 +1151,18 @@ def _serialize_voices() -> list[dict]:
     out = []
     for rec in VOICE_RECORDS:
         name = rec.get("name", "")
+        portraits = {
+            frame: bool(name) and _portrait_path(name, frame).exists()
+            for frame in PORTRAIT_FRAMES
+        }
         out.append({
             "name": name,
             "id": rec.get("id", ""),
             "color": rec.get("color", ""),
             "style": rec.get("style", ""),
             "kind": rec.get("kind", "default"),
-            "has_portrait": _has_portrait(name) if name else False,
+            "portraits": portraits,
+            "has_portrait": portraits["default"],
         })
     return out
 
