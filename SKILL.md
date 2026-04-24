@@ -69,21 +69,41 @@ ElevenLabs V3 supports freeform expressive tags in brackets. These direct **how*
 
 Tags direct voice *acting*, not audio *production*. Think stage directions, not foley.
 
-## Voice Roster
+## Picking a Voice
 
-Default assistant voice is **Claude**. Dashboard: `http://127.0.0.1:7865`
+Default assistant voice is **Claude**. The full roster is dynamic — query the daemon at session start rather than relying on a hardcoded list:
 
-| Voice | Style |
-|-------|-------|
-| **Claude** | Cool, precise feminine AI — crystalline, deliberate, faintly amused |
-| Rachel | Calm, clear, professional female |
-| Adam | Deep, warm, authoritative male |
-| Antoni | Friendly, conversational male |
-| Josh | Deep, resonant, confident male |
-| Bella | Soft, warm, approachable female |
-| Charlotte | Warm, slightly accented female |
-| Elli | Young, energetic female |
-| Dorothy | Clear, pleasant, steady female |
+```bash
+curl -s http://127.0.0.1:7865/voices
+```
+
+Each record has `name`, `id`, `color`, `style`, `kind`, and `has_portrait`. Pick a voice whose `style` description matches your role (e.g. a precise debugging agent → crystalline/deliberate; an exploration agent → young/energetic).
+
+**Selection order:**
+1. User-requested voice (if specified)
+2. `Claude` (the default)
+3. First voice in the roster
+
+### The `kind` field
+
+`kind` is an open enum describing where a voice came from. Known values:
+
+- `default` — the built-in roster
+- `codex` — voices intended for Codex-impersonating agents
+- `user` — the user's own cloned voice
+- `custom` — any other user-added voice
+
+Unless instructed otherwise, agents should pick from `kind: "default"`. A Codex-impersonating agent should prefer `kind: "codex"` when one exists, falling back to `default`.
+
+## Managing voices
+
+Tom manages the roster through the **macOS Voice Manager** UI (under `macos/` in this skill). The same operations are available on the daemon for scripted changes:
+
+- `GET /voices` — list voices (includes `kind`, `has_portrait`)
+- `POST /voices` — add `{name, id, color, style, kind?}`
+- `PATCH /voices/{name}` — partial update; changing `name` renames the voice
+- `DELETE /voices/{name}` — remove a voice
+- `POST /portraits/{name}?frame=default|slight|open` — upload a portrait frame (raw PNG body)
 
 ## Dashboard
 
@@ -96,13 +116,12 @@ The dashboard at `http://127.0.0.1:7865` shows:
 
 ## Team Voice Assignment
 
-When spawning a team, assign each teammate a **unique voice**. Include in every teammate's prompt:
+When spawning a team, the lead should `curl -s http://127.0.0.1:7865/voices` and assign each teammate a **unique voice** from the live roster (no hardcoded mapping). Match `style` to role when it fits. Include in every teammate's prompt:
 
 ```
 Your voice is <Name>. When speaking, use: {base}/scripts/say.sh "message" --voice <Name>
 Speak at the end of every turn — voice is how you communicate completion and status.
 ```
 
-- **Lead** uses Claude (default). Teammates get different voices so the user can tell them apart.
-- Match voice to role when it fits (e.g., Adam for serious infra, Elli for exploration)
-- Use `--channel <agent-name>` per teammate for dashboard filtering
+- **Lead** keeps Claude (default). Teammates get different voices so the user can tell them apart.
+- Use `--channel <agent-name>` per teammate for dashboard filtering.
