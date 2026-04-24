@@ -9,5 +9,10 @@ struct SpeakDashboardApp: App {
             PopoverRootView(viewModel: appDelegate.viewModel)
         }
         .menuBarExtraStyle(.window)
+
+        Window("Voice Manager", id: "voice-manager") {
+            VoiceManagerView(viewModel: appDelegate.viewModel)
+        }
+        .windowResizability(.contentMinSize)
     }
 }

@@ -1,5 +1,10 @@
 import SwiftUI
 
+private struct PortraitTaskID: Hashable {
+    let name: String
+    let generation: Int
+}
+
 struct PortraitView: View {
     let voiceName: String
     let amplitude: Float
@@ -58,7 +63,7 @@ struct PortraitView: View {
             }
         }
         .animation(.easeOut(duration: 0.05), value: amplitude)
-        .task(id: voiceName) {
+        .task(id: PortraitTaskID(name: voiceName, generation: portraitManager.generation)) {
             frames = nil
             let loadedFrames = await portraitManager.frames(for: voiceName)
             guard !Task.isCancelled else { return }

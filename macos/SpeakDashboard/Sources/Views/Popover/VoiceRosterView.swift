@@ -3,31 +3,52 @@ import SwiftUI
 struct VoiceRosterView: View {
     let viewModel: DashboardViewModel
 
+    @Environment(\.openWindow) private var openWindow
+
     private let columns = [
         GridItem(.flexible(), spacing: 12),
         GridItem(.flexible(), spacing: 12),
     ]
 
     var body: some View {
-        if viewModel.voices.isEmpty {
-            VStack {
+        VStack(spacing: 0) {
+            header
+            if viewModel.voices.isEmpty {
                 Spacer()
                 Text("No voices loaded")
                     .font(.subheadline)
                     .foregroundStyle(.secondary)
                 Spacer()
-            }
-            .frame(maxWidth: .infinity)
-        } else {
-            ScrollView {
-                LazyVGrid(columns: columns, spacing: 10) {
-                    ForEach(viewModel.voices) { voice in
-                        voiceCell(voice)
+            } else {
+                ScrollView {
+                    LazyVGrid(columns: columns, spacing: 10) {
+                        ForEach(viewModel.voices) { voice in
+                            voiceCell(voice)
+                        }
                     }
+                    .padding(12)
                 }
-                .padding(12)
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+
+    private var header: some View {
+        HStack {
+            Spacer()
+            Button {
+                openWindow(id: "voice-manager")
+            } label: {
+                Label("Manage…", systemImage: "slider.horizontal.3")
+                    .font(.caption)
+            }
+            .buttonStyle(.plain)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .glassEffect(.regular.interactive(), in: Capsule())
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
     }
 
     private func voiceCell(_ voice: Voice) -> some View {

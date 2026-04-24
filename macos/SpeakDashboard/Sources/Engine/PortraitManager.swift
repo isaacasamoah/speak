@@ -10,6 +10,10 @@ struct PortraitFrames {
 @MainActor
 final class PortraitManager {
 
+    /// Bumps whenever the cache is invalidated, so views observing this can
+    /// re-trigger their portrait load tasks.
+    private(set) var generation: Int = 0
+
     private var cache: [String: PortraitFrames] = [:]
     private var inFlight: [String: Task<PortraitFrames, Never>] = [:]
 
@@ -40,6 +44,21 @@ final class PortraitManager {
         }
         inFlight[key] = task
         return await task.value
+    }
+
+    func invalidateAll() {
+        cache.removeAll()
+        inFlight.values.forEach { $0.cancel() }
+        inFlight.removeAll()
+        generation &+= 1
+    }
+
+    func invalidate(voiceName: String) {
+        let key = voiceName.lowercased()
+        cache.removeValue(forKey: key)
+        inFlight[key]?.cancel()
+        inFlight.removeValue(forKey: key)
+        generation &+= 1
     }
 
     // MARK: - Private

@@ -71,8 +71,16 @@ final class DashboardViewModel {
             handlePauseStateEvent(data)
         case "history_update":
             handleHistoryUpdateEvent(data)
+        case "voices_updated":
+            handleVoicesUpdatedEvent(data)
         default:
-            break
+            // Some daemon builds deliver events as a generic "message" with
+            // the event name inside the JSON payload. Fall back to sniffing.
+            if event == "message", let type = try? decoder.decode(EventTypeProbe.self, from: data).type {
+                if type == "voices_updated" {
+                    handleVoicesUpdatedEvent(data)
+                }
+            }
         }
     }
 
@@ -231,4 +239,61 @@ final class DashboardViewModel {
             voices = fetched
         }
     }
+
+    func refreshVoices() async {
+        if let fetched = try? await api.fetchVoices() {
+            voices = fetched
+        }
+    }
+
+    // MARK: - Voice CRUD
+
+    func createVoice(name: String, id: String, color: String, style: String, kind: String?) async throws {
+        try await api.createVoice(name: name, id: id, color: color, style: style, kind: kind)
+        await refreshVoices()
+    }
+
+    func updateVoice(currentName: String, patch: [String: Any]) async throws {
+        let data = try JSONSerialization.data(withJSONObject: patch)
+        try await api.updateVoice(currentName: currentName, patchJSON: data)
+        await refreshVoices()
+    }
+
+    func deleteVoice(name: String) async throws {
+        try await api.deleteVoice(name: name)
+        portraitManager.invalidate(voiceName: name)
+        await refreshVoices()
+    }
+
+    // MARK: - voices_updated handling
+
+    private func handleVoicesUpdatedEvent(_ data: Data) {
+        let event = try? decoder.decode(VoicesUpdatedEvent.self, from: data)
+        let reason = event?.reason ?? ""
+        let name = event?.name
+
+        if reason == "portrait", let name {
+            portraitManager.invalidate(voiceName: name)
+        } else if let name {
+            // Created / updated / deleted: best to invalidate just the affected
+            // voice, but fall back to a full flush if the event is vague.
+            portraitManager.invalidate(voiceName: name)
+        } else {
+            portraitManager.invalidateAll()
+        }
+
+        Task { [weak self] in
+            await self?.refreshVoices()
+        }
+    }
+}
+
+private struct VoicesUpdatedEvent: Decodable {
+    let type: String?
+    let reason: String?
+    let name: String?
+}
+
+private struct EventTypeProbe: Decodable {
+    let type: String?
 }
