@@ -21,10 +21,14 @@ Endpoints:
   GET  /history            Playback history
   POST /history/replay     Replay from cache
   GET  /voices             Voice configuration
+  POST /voices             Create voice
+  PATCH /voices/{name}     Update/rename voice
+  DELETE /voices/{name}    Delete voice
   GET  /events             SSE stream
   GET  /health             Health check
   GET  /                   Dashboard
   GET  /portraits/{name}   Portrait images
+  POST /portraits/{name}   Upload portrait PNG (?frame=default|slight|open)
 """
 
 import asyncio
@@ -110,16 +114,21 @@ DASHBOARD_PORT = int(os.environ.get("SPEAK_PORT", "7865"))
 CACHE_DIR = Path(os.environ.get("SPEAK_CACHE_DIR", str(REPO_ROOT / "cache")))
 
 
-def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
-    voices_path = REPO_ROOT / "voices.json"
+VOICES_PATH = REPO_ROOT / "voices.json"
+PORTRAITS_DIR = DASHBOARD_DIR / "portraits"
+PORTRAIT_FRAMES = {"default": "", "slight": "_slight", "open": "_open"}
+
+
+def _load_voices() -> tuple[list[dict], dict[str, str], dict[str, str]]:
+    records: list[dict] = []
     roster: dict[str, str] = {}
     by_name: dict[str, str] = {}
-    if voices_path.exists():
+    if VOICES_PATH.exists():
         try:
-            entries = json.loads(voices_path.read_text())
+            entries = json.loads(VOICES_PATH.read_text())
             if not isinstance(entries, list):
                 log.warning("voices.json is not a list")
-                return roster, by_name
+                return records, roster, by_name
             for entry in entries:
                 if not isinstance(entry, dict):
                     continue
@@ -127,14 +136,82 @@ def _load_voices() -> tuple[dict[str, str], dict[str, str]]:
                 vid = entry.get("id")
                 if not isinstance(name, str) or not isinstance(vid, str):
                     continue
+                if "kind" not in entry:
+                    entry["kind"] = "default"
+                records.append(entry)
                 roster[vid] = name
                 by_name[name.lower()] = vid
         except (json.JSONDecodeError, KeyError) as e:
             log.warning(f"Failed to load voices.json: {e}")
-    return roster, by_name
+    return records, roster, by_name
 
 
-VOICE_ROSTER, VOICE_BY_NAME = _load_voices()
+VOICE_RECORDS, VOICE_ROSTER, VOICE_BY_NAME = _load_voices()
+
+
+def _rebuild_voice_indexes():
+    VOICE_ROSTER.clear()
+    VOICE_BY_NAME.clear()
+    for rec in VOICE_RECORDS:
+        name = rec.get("name")
+        vid = rec.get("id")
+        if isinstance(name, str) and isinstance(vid, str):
+            VOICE_ROSTER[vid] = name
+            VOICE_BY_NAME[name.lower()] = vid
+
+
+def _save_voices():
+    VOICES_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fd, tmp = tempfile.mkstemp(prefix=".voices-", suffix=".json", dir=str(VOICES_PATH.parent))
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(VOICE_RECORDS, f, indent=2, ensure_ascii=False)
+            f.write("\n")
+        os.replace(tmp, VOICES_PATH)
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _find_voice_index(name: str) -> int:
+    target = name.lower()
+    for i, rec in enumerate(VOICE_RECORDS):
+        if isinstance(rec.get("name"), str) and rec["name"].lower() == target:
+            return i
+    return -1
+
+
+def _portrait_path(name: str, frame: str = "default") -> Path:
+    suffix = PORTRAIT_FRAMES[frame]
+    return PORTRAITS_DIR / f"{name.lower()}{suffix}.png"
+
+
+def _has_portrait(name: str) -> bool:
+    return _portrait_path(name, "default").exists()
+
+
+def _delete_portraits(name: str):
+    for frame in PORTRAIT_FRAMES:
+        p = _portrait_path(name, frame)
+        if p.exists():
+            try:
+                p.unlink()
+            except OSError as e:
+                log.warning(f"Failed to delete portrait {p}: {e}")
+
+
+def _rename_portraits(old_name: str, new_name: str):
+    for frame in PORTRAIT_FRAMES:
+        src = _portrait_path(old_name, frame)
+        dst = _portrait_path(new_name, frame)
+        if src.exists() and src != dst:
+            try:
+                os.replace(src, dst)
+            except OSError as e:
+                log.warning(f"Failed to rename portrait {src} -> {dst}: {e}")
 
 _api_voices_cache: dict[str, str] | None = None
 
@@ -1070,15 +1147,203 @@ async def handle_index(request: StarletteRequest) -> HTMLResponse:
     return HTMLResponse("<h1>Dashboard not found</h1>", status_code=404)
 
 
+def _serialize_voices() -> list[dict]:
+    out = []
+    for rec in VOICE_RECORDS:
+        name = rec.get("name", "")
+        out.append({
+            "name": name,
+            "id": rec.get("id", ""),
+            "color": rec.get("color", ""),
+            "style": rec.get("style", ""),
+            "kind": rec.get("kind", "default"),
+            "has_portrait": _has_portrait(name) if name else False,
+        })
+    return out
+
+
 async def handle_voices(request: StarletteRequest) -> JSONResponse:
-    voices_path = REPO_ROOT / "voices.json"
-    if voices_path.exists():
+    return JSONResponse({"voices": _serialize_voices()})
+
+
+async def _broadcast_voices_updated(request: StarletteRequest, reason: str, name: str):
+    broadcaster: SSEBroadcaster = request.app.state.broadcaster
+    await broadcaster.send("voices_updated", {
+        "type": "voices_updated",
+        "reason": reason,
+        "name": name,
+    })
+
+
+async def handle_voices_create(request: StarletteRequest) -> JSONResponse:
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Expected JSON object"}, status_code=400)
+
+    name = body.get("name")
+    vid = body.get("id")
+    color = body.get("color", "")
+    style = body.get("style", "")
+    kind = body.get("kind", "default")
+
+    if not isinstance(name, str) or not name.strip():
+        return JSONResponse({"error": "name is required"}, status_code=400)
+    if not isinstance(vid, str) or not vid.strip():
+        return JSONResponse({"error": "id is required"}, status_code=400)
+    if not isinstance(color, str):
+        return JSONResponse({"error": "color must be a string"}, status_code=400)
+    if not isinstance(style, str):
+        return JSONResponse({"error": "style must be a string"}, status_code=400)
+    if not isinstance(kind, str):
+        return JSONResponse({"error": "kind must be a string"}, status_code=400)
+
+    name = name.strip()
+    if _find_voice_index(name) != -1:
+        return JSONResponse({"error": f"Voice '{name}' already exists"}, status_code=409)
+
+    record = {
+        "name": name,
+        "id": vid.strip(),
+        "color": color,
+        "style": style,
+        "kind": kind or "default",
+    }
+    VOICE_RECORDS.append(record)
+    try:
+        await asyncio.to_thread(_save_voices)
+    except Exception as e:
+        VOICE_RECORDS.pop()
+        return JSONResponse({"error": f"Failed to persist: {e}"}, status_code=500)
+    _rebuild_voice_indexes()
+
+    await _broadcast_voices_updated(request, "created", name)
+    return JSONResponse({
+        "name": name,
+        "id": record["id"],
+        "color": record["color"],
+        "style": record["style"],
+        "kind": record["kind"],
+        "has_portrait": _has_portrait(name),
+    }, status_code=201)
+
+
+async def handle_voices_update(request: StarletteRequest) -> JSONResponse:
+    name = request.path_params["name"]
+    try:
+        body = await request.json()
+    except Exception:
+        return JSONResponse({"error": "Invalid JSON"}, status_code=400)
+    if not isinstance(body, dict):
+        return JSONResponse({"error": "Expected JSON object"}, status_code=400)
+
+    idx = _find_voice_index(name)
+    if idx == -1:
+        return JSONResponse({"error": f"Voice '{name}' not found"}, status_code=404)
+
+    record = dict(VOICE_RECORDS[idx])
+    old_name = record["name"]
+    new_name = old_name
+
+    if "name" in body:
+        nn = body["name"]
+        if not isinstance(nn, str) or not nn.strip():
+            return JSONResponse({"error": "name must be a non-empty string"}, status_code=400)
+        nn = nn.strip()
+        if nn.lower() != old_name.lower():
+            conflict = _find_voice_index(nn)
+            if conflict != -1 and conflict != idx:
+                return JSONResponse({"error": f"Voice '{nn}' already exists"}, status_code=409)
+        new_name = nn
+        record["name"] = nn
+
+    for field_name in ("id", "color", "style", "kind"):
+        if field_name in body:
+            val = body[field_name]
+            if not isinstance(val, str):
+                return JSONResponse({"error": f"{field_name} must be a string"}, status_code=400)
+            record[field_name] = val
+
+    VOICE_RECORDS[idx] = record
+    try:
+        await asyncio.to_thread(_save_voices)
+    except Exception as e:
+        return JSONResponse({"error": f"Failed to persist: {e}"}, status_code=500)
+
+    if new_name.lower() != old_name.lower():
+        _rename_portraits(old_name, new_name)
+    _rebuild_voice_indexes()
+
+    await _broadcast_voices_updated(request, "updated", new_name)
+    return JSONResponse({
+        "name": record["name"],
+        "id": record.get("id", ""),
+        "color": record.get("color", ""),
+        "style": record.get("style", ""),
+        "kind": record.get("kind", "default"),
+        "has_portrait": _has_portrait(new_name),
+    })
+
+
+async def handle_voices_delete(request: StarletteRequest) -> JSONResponse:
+    name = request.path_params["name"]
+    idx = _find_voice_index(name)
+    if idx == -1:
+        return JSONResponse({"error": f"Voice '{name}' not found"}, status_code=404)
+
+    record = VOICE_RECORDS.pop(idx)
+    actual_name = record.get("name", name)
+    try:
+        await asyncio.to_thread(_save_voices)
+    except Exception as e:
+        VOICE_RECORDS.insert(idx, record)
+        return JSONResponse({"error": f"Failed to persist: {e}"}, status_code=500)
+
+    _delete_portraits(actual_name)
+    _rebuild_voice_indexes()
+
+    await _broadcast_voices_updated(request, "deleted", actual_name)
+    return JSONResponse(None, status_code=204)
+
+
+async def handle_portrait_upload(request: StarletteRequest) -> JSONResponse:
+    name = request.path_params["name"]
+    frame = request.query_params.get("frame", "default")
+    if frame not in PORTRAIT_FRAMES:
+        return JSONResponse({"error": f"frame must be one of: {sorted(PORTRAIT_FRAMES)}"}, status_code=400)
+
+    content_type = request.headers.get("content-type", "").split(";", 1)[0].strip().lower()
+    if content_type != "image/png":
+        return JSONResponse({"error": "Content-Type must be image/png"}, status_code=400)
+
+    data = await request.body()
+    if len(data) < 8 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return JSONResponse({"error": "Body is not a valid PNG"}, status_code=400)
+
+    PORTRAITS_DIR.mkdir(parents=True, exist_ok=True)
+    dest = _portrait_path(name, frame)
+
+    fd, tmp = tempfile.mkstemp(prefix=".portrait-", suffix=".png", dir=str(PORTRAITS_DIR))
+    try:
+        with os.fdopen(fd, "wb") as f:
+            f.write(data)
+        os.replace(tmp, dest)
+    except Exception as e:
         try:
-            data = json.loads(voices_path.read_text())
-            return JSONResponse(data)
-        except json.JSONDecodeError:
+            os.unlink(tmp)
+        except OSError:
             pass
-    return JSONResponse([])
+        return JSONResponse({"error": f"Failed to save portrait: {e}"}, status_code=500)
+
+    await _broadcast_voices_updated(request, "portrait", name)
+    return JSONResponse({
+        "name": name,
+        "frame": frame,
+        "path": str(dest.relative_to(REPO_ROOT)),
+        "bytes": len(data),
+    })
 
 
 async def handle_portrait(request: StarletteRequest) -> FileResponse | HTMLResponse:
@@ -1132,8 +1397,12 @@ async def main():
         Route("/history/replay", handle_history_replay, methods=["POST"]),
         Route("/events", handle_events, methods=["GET"]),
         Route("/voices", handle_voices, methods=["GET"]),
+        Route("/voices", handle_voices_create, methods=["POST"]),
+        Route("/voices/{name}", handle_voices_update, methods=["PATCH"]),
+        Route("/voices/{name}", handle_voices_delete, methods=["DELETE"]),
         Route("/health", handle_health, methods=["GET"]),
         Route("/", handle_index, methods=["GET"]),
+        Route("/portraits/{name}", handle_portrait_upload, methods=["POST"]),
         Route("/portraits/{name:path}", handle_portrait, methods=["GET"]),
     ])
     app.state.queue = queue

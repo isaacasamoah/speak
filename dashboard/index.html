@@ -1356,7 +1356,10 @@ function buildGrid(voices) {
 // Fetch voice list from server, fall back to empty grid
 fetch('/voices')
   .then(function(r) { return r.json(); })
-  .then(function(data) { buildGrid(data); })
+  .then(function(data) {
+    var list = Array.isArray(data) ? data : (data && data.voices) || [];
+    buildGrid(list);
+  })
   .catch(function() { buildGrid([]); });
 
 // ========== MOUTH ELEMENT CACHE ==========
