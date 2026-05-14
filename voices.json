@@ -61,5 +61,12 @@
     "color": "#da3633",
     "style": "Clear, pleasant, steady female",
     "kind": "default"
+  },
+  {
+    "name": "Codex",
+    "id": "KlKng817U95XYtfP1Vtl",
+    "color": "#3f0c80",
+    "style": "Low, calm, precise AI — clipped, pragmatic, dryly understated",
+    "kind": "codex"
   }
 ]
