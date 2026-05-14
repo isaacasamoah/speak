@@ -1284,6 +1284,9 @@ function buildGrid(voices) {
     var tile = document.createElement('div');
     tile.className = 'tile';
     tile.dataset.voice = v.name;
+    var color = sanitizeColor(v.color || '#58a6ff');
+    tile.style.setProperty('--glow', color);
+    tile.style.setProperty('--glow-rgb', hexToRgb(color));
 
     var wrap = document.createElement('div');
     wrap.className = 'portrait-wrap';
