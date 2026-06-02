@@ -170,6 +170,50 @@ def speak_elevenlabs(text, api_key, voice_id, model=DEFAULT_MODEL, sync=False):
     return True
 
 
+def synth_to_file(text, api_key, voice_id, out_path, model=DEFAULT_MODEL):
+    """Synthesize speech to a file via ElevenLabs — no playback.
+
+    Additive: used by callers that need the audio as a file (e.g. sending a
+    Telegram voice note) rather than played through afplay. Returns True on
+    success. Leaves the existing speak()/speak_elevenlabs() playback paths
+    untouched.
+    """
+    url = f"{API_BASE}/text-to-speech/{voice_id}"
+    payload = json.dumps({
+        "text": text,
+        "model_id": model,
+        "output_format": DEFAULT_FORMAT,
+    }).encode()
+
+    req = Request(url, data=payload, headers={
+        "xi-api-key": api_key,
+        "Content-Type": "application/json",
+    })
+
+    try:
+        with urlopen(req) as resp:
+            audio_data = resp.read()
+    except HTTPError as e:
+        body = ""
+        try:
+            body = e.read().decode()
+        except Exception:
+            pass
+        print(f"ElevenLabs API error {e.code}: {body}", file=sys.stderr)
+        return False
+    except URLError as e:
+        print(f"Network error: {e.reason}", file=sys.stderr)
+        return False
+
+    try:
+        with open(out_path, "wb") as f:
+            f.write(audio_data)
+    except OSError as e:
+        print(f"Could not write audio to {out_path}: {e}", file=sys.stderr)
+        return False
+    return True
+
+
 def speak_macos(text, sync=False):
     if sync:
         subprocess.run(["say", text])
@@ -239,6 +283,7 @@ def main():
     parser.add_argument("--voice", "-v", help="Override voice ID or voice name")
     parser.add_argument("--model", "-m", default=DEFAULT_MODEL, help="Model ID")
     parser.add_argument("--sync", action="store_true", help="Wait for audio to finish")
+    parser.add_argument("--out", help="Synthesize to this file path instead of playing (no afplay)")
     parser.add_argument("--list-voices", action="store_true", help="List available voices")
     parser.add_argument("--tag-help", action="store_true", help="Show audio tag reference")
     args = parser.parse_args()
@@ -265,6 +310,17 @@ def main():
 
     if not text:
         sys.exit(0)
+
+    # File-output mode: synthesize to a file, no playback. Used by callers that
+    # need the audio (e.g. a Telegram voice note). Requires ElevenLabs config.
+    if args.out:
+        config = get_config()
+        voice = resolve_voice_id(args.voice or config["voice_id"])
+        if not config["api_key"] or not voice:
+            print("--out requires ELEVENLABS_API_KEY and a voice (--voice or ELEVENLABS_VOICE_ID).", file=sys.stderr)
+            sys.exit(1)
+        ok = synth_to_file(text, config["api_key"], voice, args.out, args.model)
+        sys.exit(0 if ok else 1)
 
     speak(text, args.voice, args.model, args.sync)
 
