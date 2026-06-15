@@ -1,5 +1,12 @@
 [
   {
+    "name": "Forge",
+    "id": "TxGEqnHWrfWFTfGW9XjX",
+    "color": "#f0883e",
+    "style": "PLACEHOLDER (Josh preset) pending custom ElevenLabs design — machine-speaking-itself: androgynous, ageless, low even mid-range, faintly synthetic, crystalline, states-not-performs. Swap id when designed.",
+    "kind": "forge"
+  },
+  {
     "name": "Claude",
     "id": "ufd1qDyw7e2Y1tmhnlkm",
     "color": "#58a6ff",
@@ -68,5 +75,19 @@
     "color": "#3f0c80",
     "style": "Low, calm, precise AI — clipped, pragmatic, dryly understated",
     "kind": "codex"
+  },
+  {
+    "name": "Wren",
+    "id": "Fj0YmcQlAAKaZVdHmuI3",
+    "color": "#7a8b6e",
+    "style": "soft Irish-accented late-twenties voice, calm + attentive, steady warm cadence, careful colleague feel",
+    "kind": "user"
+  },
+  {
+    "name": "Jeremy",
+    "id": "TboyitrYav748TAHbt1c",
+    "color": "#bb74ff",
+    "style": "Jeremy is a french cheese afficiondo who moonlights as a plain spoken tech lead",
+    "kind": "default"
   }
 ]
