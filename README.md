@@ -96,6 +96,9 @@ The daemon also falls back to the ElevenLabs API for voice names not in `voices.
 # Channel tagging (for multi-agent filtering)
 ./scripts/say.sh "Status update" --voice Elli --channel researcher
 
+# Session attribution (auto-resolved from the Claude Code environment; override explicitly)
+./scripts/say.sh "Build done" --session "My Project Session"
+
 # Priority (jumps queue)
 ./scripts/say.sh "Alert!" --priority
 
@@ -117,6 +120,7 @@ Install as a skill in `~/.claude/skills/speak/` (or wherever you like), then ref
 
 The web dashboard shows:
 - Animated portraits with lip-sync during playback
+- Speaker attribution on every line: voice, session, and agent channel
 - Transport controls (pause/resume, skip, seek)
 - Queue panel with per-channel pause toggles
 - History panel with replay and voice filtering
