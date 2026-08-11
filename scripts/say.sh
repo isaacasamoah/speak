@@ -30,6 +30,7 @@ DAEMON="http://127.0.0.1:$SPEAK_PORT"
 TEXT=""
 VOICE="Claude"
 CHANNEL=""
+SESSION=""
 PRIORITY=false
 ACTION=""
 LIMIT=50
@@ -39,6 +40,7 @@ while [[ $# -gt 0 ]]; do
   case "$1" in
     --voice)    VOICE="$2"; shift 2 ;;
     --channel)  CHANNEL="$2"; shift 2 ;;
+    --session)  SESSION="$2"; shift 2 ;;
     --priority) PRIORITY=true; shift ;;
     --status)   ACTION="status"; shift ;;
     --skip)     ACTION="skip"; shift ;;
@@ -56,6 +58,55 @@ done
 # Check daemon health
 daemon_up() {
   curl -sf --connect-timeout 1 "$DAEMON/health" >/dev/null 2>&1
+}
+
+# Resolve the session name for speaker attribution. A Claude Code background
+# job carries its live name in $CLAUDE_JOB_DIR/state.json; any other session
+# is named by the last title record in its transcript (the same mechanism the
+# harness uses for its session list, so renames are picked up on the next call).
+# Subagents inherit both env vars, so their lines attribute to the parent session.
+resolve_session() {
+  python3 - <<'PY' 2>/dev/null || true
+import glob, json, os
+
+def job_name():
+    d = os.environ.get("CLAUDE_JOB_DIR")
+    if not d:
+        return None
+    try:
+        with open(os.path.join(d, "state.json")) as f:
+            return json.load(f).get("name") or None
+    except (OSError, ValueError):
+        return None
+
+def transcript_name():
+    sid = os.environ.get("CLAUDE_CODE_SESSION_ID")
+    if not sid:
+        return None
+    hits = glob.glob(os.path.expanduser(f"~/.claude/projects/*/{sid}.jsonl"))
+    if not hits:
+        return None
+    path = max(hits, key=os.path.getmtime)
+    try:
+        with open(path, "rb") as f:
+            f.seek(0, os.SEEK_END)
+            f.seek(max(0, f.tell() - 262144))
+            tail = f.read().decode("utf-8", "replace")
+    except OSError:
+        return None
+    name = None
+    for line in tail.splitlines():
+        if '"ai-title"' not in line and '"agent-name"' not in line:
+            continue
+        try:
+            rec = json.loads(line)
+        except ValueError:
+            continue
+        name = rec.get("aiTitle") or rec.get("agentName") or name
+    return name
+
+print(job_name() or transcript_name() or "")
+PY
 }
 
 # Build JSON body with safe serialization
@@ -95,7 +146,7 @@ case "${ACTION:-speak}" in
     ;;
   speak)
     [[ -z "$TEXT" ]] && {
-      echo "Usage: say.sh \"text\" [--voice NAME] [--channel CH] [--priority]" >&2
+      echo "Usage: say.sh \"text\" [--voice NAME] [--channel CH] [--session NAME] [--priority]" >&2
       echo "       say.sh --status | --skip | --clear | --pause | --resume" >&2
       echo "       say.sh --history [--limit N] | --replay ID" >&2
       exit 1
@@ -110,6 +161,8 @@ case "${ACTION:-speak}" in
       exit $?
     fi
 
+    [[ -z "$SESSION" ]] && SESSION="$(resolve_session)"
+
     # Build JSON body using python3 for safe serialization
     BODY=$(python3 -c "
 import json, sys
@@ -117,8 +170,9 @@ d = {'text': sys.argv[1]}
 if sys.argv[2]: d['voice'] = sys.argv[2]
 if sys.argv[3]: d['channel'] = sys.argv[3]
 if sys.argv[4] == 'true': d['priority'] = True
+if sys.argv[5]: d['session'] = sys.argv[5]
 print(json.dumps(d))
-" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY")
+" "$TEXT" "$VOICE" "$CHANNEL" "$PRIORITY" "$SESSION")
 
     curl -sf -X POST -H "Content-Type: application/json" -d "$BODY" "$DAEMON/speak"
     ;;

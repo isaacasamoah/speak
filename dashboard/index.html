@@ -393,6 +393,20 @@
     letter-spacing: 0.5px;
   }
 
+  .session-tag {
+    display: inline-block;
+    font-size: 9px;
+    padding: 1px 6px;
+    border-radius: 4px;
+    background: rgba(255, 255, 255, 0.09);
+    color: rgba(255, 255, 255, 0.45);
+    letter-spacing: 0.5px;
+    vertical-align: middle;
+    flex-shrink: 0;
+  }
+
+  #nowPlaying .session-tag { margin-left: 4px; }
+
   .transport-right {
     display: flex;
     align-items: center;
@@ -1693,6 +1707,12 @@ function getTile(voiceName) {
       var truncText = (item.text || '').slice(0, 50) + ((item.text || '').length > 50 ? '\u2026' : '');
       textSpan.textContent = truncText;
       el.appendChild(textSpan);
+      if (item.session) {
+        var sessTag = document.createElement('span');
+        sessTag.className = 'session-tag';
+        sessTag.textContent = item.session;
+        el.appendChild(sessTag);
+      }
       if (item.channel) {
         var chTag = document.createElement('span');
         chTag.className = 'channel-tag';
@@ -1764,6 +1784,7 @@ function getTile(voiceName) {
           var html = '';
           if (lastPlayState.priority) html += '\u26a1 ';
           html += '<em>' + esc(lastPlayState.voice || 'Claude') + '</em>';
+          if (lastPlayState.session) html += ' <span class="session-tag">' + esc(lastPlayState.session) + '</span>';
           if (lastPlayState.channel) html += ' <span class="channel-tag">' + esc(lastPlayState.channel) + '</span>';
           html += ' \u00a0' + esc(lastPlayState.text || '');
           nowPlaying.innerHTML = html;
@@ -1771,10 +1792,10 @@ function getTile(voiceName) {
       }
     },
 
-    setPlaying: function(voice, text, channel, priority) {
+    setPlaying: function(voice, text, channel, priority, session) {
       playing = true;
       paused = false;
-      lastPlayState = { voice: voice, text: text, channel: channel, priority: priority };
+      lastPlayState = { voice: voice, text: text, channel: channel, priority: priority, session: session };
       pauseBtn.innerHTML = PAUSE_SVG;
       pauseBtn.title = 'Pause (Space)';
       document.body.classList.remove('global-paused');
@@ -1786,6 +1807,7 @@ function getTile(voiceName) {
       var html = '';
       if (priority) html += '\u26a1 ';
       html += '<em>' + esc(voice || 'Claude') + '</em>';
+      if (session) html += ' <span class="session-tag">' + esc(session) + '</span>';
       if (channel) html += ' <span class="channel-tag">' + esc(channel) + '</span>';
       html += ' \u00a0' + esc(text || '');
       nowPlaying.innerHTML = html;
@@ -2069,6 +2091,13 @@ function getTile(voiceName) {
     voiceEl.style.color = color;
     voiceEl.textContent = entry.voice || 'Unknown';
     row.appendChild(voiceEl);
+
+    if (entry.session) {
+      var sessEl = document.createElement('span');
+      sessEl.className = 'session-tag';
+      sessEl.textContent = entry.session;
+      row.appendChild(sessEl);
+    }
 
     var textEl = document.createElement('span');
     textEl.className = 'history-row-text';
@@ -2403,7 +2432,7 @@ function connect() {
     if (data.playing && data.items && data.items.length > 0) {
       var p = data.items[0];
       setActive(p.voice);
-      Transport.setPlaying(p.voice, p.text, p.channel, p.priority);
+      Transport.setPlaying(p.voice, p.text, p.channel, p.priority, p.session);
     }
 
     // History
@@ -2471,10 +2500,10 @@ function connect() {
 
       if (data.type === 'speak') {
         setActive(data.voice);
-        Transport.setPlaying(data.voice, data.text, data.channel, data.priority);
+        Transport.setPlaying(data.voice, data.text, data.channel, data.priority, data.session);
       } else if (data.type === 'dialogue' && data.segments && data.segments.length > 0) {
         setActive(data.segments[0].voice);
-        Transport.setPlaying(data.segments[0].voice, data.segments[0].text, data.channel, data.priority);
+        Transport.setPlaying(data.segments[0].voice, data.segments[0].text, data.channel, data.priority, data.session);
       }
     }, syncDelay);
 

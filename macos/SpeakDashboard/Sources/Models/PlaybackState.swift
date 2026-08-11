@@ -16,6 +16,7 @@ final class PlaybackState {
     var chunkMs: Int = 50
     var queuedCount: Int = 0
     var channel: String?
+    var session: String?
 
     var globalPaused = false
     var channelPaused: [String] = []
@@ -36,6 +37,8 @@ final class PlaybackState {
             offset = 0
             elapsed = 0
             envelope = []
+            channel = nil
+            session = nil
         } else {
             isPlaying = true
             currentVoice = data.voice
@@ -49,6 +52,7 @@ final class PlaybackState {
             envelope = data.envelope ?? []
             chunkMs = data.chunkMs ?? 50
             channel = data.channel
+            session = data.session
             startTimer()
         }
         queuedCount = data.queued ?? 0
@@ -94,6 +98,7 @@ struct VoiceActiveEvent: Codable {
     let chunkMs: Int?
     let queued: Int?
     let channel: String?
+    let session: String?
     let priority: Bool?
 
     enum CodingKeys: String, CodingKey {
@@ -101,7 +106,7 @@ struct VoiceActiveEvent: Codable {
         case totalDuration = "total_duration"
         case offset, segments, envelope
         case chunkMs = "chunk_ms"
-        case queued, channel, priority
+        case queued, channel, session, priority
     }
 }
 
