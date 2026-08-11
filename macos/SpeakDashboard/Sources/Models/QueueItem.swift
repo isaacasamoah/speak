@@ -7,6 +7,7 @@ struct QueueItem: Codable, Identifiable {
     let voice: String
     let text: String
     let channel: String?
+    let session: String?
     let priority: Bool
 
     var isPlaying: Bool { status == "playing" }

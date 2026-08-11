@@ -28,6 +28,28 @@ struct FloatingHeadsView: View {
                             .padding(.horizontal, 8)
                             .padding(.vertical, 2)
                             .glassEffect(.clear.tint(viewModel.voiceColor(for: voice)), in: Capsule())
+
+                        if let session = viewModel.playback.session, !session.isEmpty {
+                            Text(session)
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundStyle(.white.opacity(0.92))
+                                .lineLimit(2)
+                                .multilineTextAlignment(.center)
+                                .frame(maxWidth: 200)
+                                .padding(.horizontal, 7)
+                                .padding(.vertical, 2)
+                                .glassEffect(.clear.tint(.black.opacity(0.4)), in: RoundedRectangle(cornerRadius: 8))
+                        }
+
+                        if let channel = viewModel.playback.channel, !channel.isEmpty {
+                            Text(channel)
+                                .font(.system(size: 8, weight: .medium))
+                                .foregroundStyle(.white.opacity(0.8))
+                                .lineLimit(1)
+                                .padding(.horizontal, 6)
+                                .padding(.vertical, 1)
+                                .glassEffect(.clear.tint(.black.opacity(0.3)), in: Capsule())
+                        }
                     }
                     .id(voice)
                     .transition(.opacity.combined(with: .scale(scale: 0.92)))
@@ -53,7 +75,7 @@ struct FloatingHeadsView: View {
                 }
             }
         }
-        .frame(width: 240, height: 260)
+        .frame(width: 240, height: 300)
         .animation(.spring(response: 0.5, dampingFraction: 0.75), value: viewModel.queueItems.map(\.id))
         .animation(.easeInOut(duration: 0.4), value: viewModel.playback.currentVoice)
     }

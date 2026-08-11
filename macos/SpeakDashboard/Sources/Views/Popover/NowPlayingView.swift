@@ -25,6 +25,20 @@ struct NowPlayingView: View {
                     .font(.headline)
                     .foregroundStyle(.primary)
 
+                if let session = viewModel.playback.session, !session.isEmpty {
+                    Text(session)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .padding(.horizontal, 16)
+                }
+
+                if let channel = viewModel.playback.channel, !channel.isEmpty {
+                    Text("#\(channel)")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                }
+
                 if let text = viewModel.playback.currentText {
                     Text(text)
                         .font(.subheadline)
