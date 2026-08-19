@@ -42,6 +42,20 @@ Queue operations:
 {base}/scripts/say.sh --replay <id>
 ```
 
+## Speaker Attribution
+
+Every spoken line is attributed on the dashboards as a stack: **voice → session → agent**.
+
+- **Session** — resolved automatically by `say.sh` from the Claude Code environment
+  (`$CLAUDE_JOB_DIR/state.json` name, falling back to the session transcript's latest
+  title record). Renames are picked up on the next call, and subagents inherit the
+  environment, so their lines attribute to the parent session. No action needed;
+  `--session "Name"` overrides.
+- **Agent** (`--channel`) — the main agent speaks with no `--channel`. Every spawned
+  subagent/teammate must be told its name in its spawn brief (see Team Voice
+  Assignment) so its lines carry the third stack line. Channels also drive
+  per-channel pause and filtering on the dashboards.
+
 ## Rules
 
 - Always output text too — TTS supplements, never replaces
@@ -108,7 +122,8 @@ Tom manages the roster through the **macOS Voice Manager** UI (under `macos/` in
 ## Dashboard
 
 The dashboard at `http://127.0.0.1:7865` shows:
-- **Portraits** with lip-sync animation during playback
+- **Portraits** with lip-sync animation during playback, labelled with the
+  voice → session → agent attribution stack
 - **Transport bar** — pause/resume (Space), skip (Right arrow)
 - **Audio scrubber** — progress bar with elapsed/remaining time, drag to seek
 - **Queue panel** — upcoming items, per-channel pause toggles
@@ -119,9 +134,10 @@ The dashboard at `http://127.0.0.1:7865` shows:
 When spawning a team, the lead should `curl -s http://127.0.0.1:7865/voices` and assign each teammate a **unique voice** from the live roster (no hardcoded mapping). Match `style` to role when it fits. Include in every teammate's prompt:
 
 ```
-Your voice is <Name>. When speaking, use: {base}/scripts/say.sh "message" --voice <Name>
+Your voice is <Name>. When speaking, use: {base}/scripts/say.sh "message" --voice <Name> --channel <agent-name>
 Speak at the end of every turn — voice is how you communicate completion and status.
 ```
 
 - **Lead** keeps Claude (default). Teammates get different voices so the user can tell them apart.
-- Use `--channel <agent-name>` per teammate for dashboard filtering.
+- Use `--channel <agent-name>` per teammate — it drives dashboard filtering and renders
+  as the agent line under the portrait, so the user can see which agent is talking.

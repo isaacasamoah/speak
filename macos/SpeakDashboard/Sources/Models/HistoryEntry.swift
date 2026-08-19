@@ -5,6 +5,7 @@ struct HistoryEntry: Codable, Identifiable {
     let voice: String
     let text: String
     let channel: String?
+    let session: String?
     let timestamp: Double
     let duration: Double?
     let type: String

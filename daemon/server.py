@@ -440,6 +440,7 @@ class QueueEntry:
     entry_type: str = "speak"
     dialogue_segments: list[dict] = field(default_factory=list)
     channel: str | None = None
+    session: str | None = None
     priority: bool = False
     history_id: str = ""
     full_text: str = ""
@@ -536,7 +537,7 @@ class AudioQueue:
                     "id": None, "voice": None, "type": "idle",
                     "text": None, "duration": None, "segments": None,
                     "queued": len(self._deque),
-                    "channel": None, "priority": False,
+                    "channel": None, "session": None, "priority": False,
                 })
                 if not entry.is_replay:
                     history_entry = {
@@ -544,6 +545,7 @@ class AudioQueue:
                         "voice": entry.voice_label,
                         "text": entry.full_text or entry.text_preview,
                         "channel": entry.channel,
+                        "session": entry.session,
                         "timestamp": entry.created_at,
                         "duration": None,
                         "type": entry.entry_type,
@@ -613,6 +615,7 @@ class AudioQueue:
                         "chunk_ms": 50,
                         "queued": len(self._deque),
                         "channel": entry.channel,
+                        "session": entry.session,
                         "priority": entry.priority,
                     }
                     await self._broadcaster.send("voice_active", voice_event)
@@ -669,6 +672,7 @@ class AudioQueue:
                         "voice": entry.voice_label,
                         "text": entry.full_text or entry.text_preview,
                         "channel": entry.channel,
+                        "session": entry.session,
                         "timestamp": entry.created_at,
                         "duration": round(duration, 3) if duration else None,
                         "type": entry.entry_type,
@@ -690,7 +694,7 @@ class AudioQueue:
                     "id": None, "voice": None, "type": "idle",
                     "text": None, "duration": None, "segments": None,
                     "queued": len(self._deque),
-                    "channel": None, "priority": False,
+                    "channel": None, "session": None, "priority": False,
                 })
 
     def status(self, channel: str | None = None) -> dict:
@@ -703,6 +707,7 @@ class AudioQueue:
                     "voice": self._current.voice_label,
                     "text": self._current.text_preview,
                     "channel": self._current.channel,
+                    "session": self._current.session,
                     "priority": self._current.priority,
                 })
 
@@ -716,6 +721,7 @@ class AudioQueue:
                 "voice": entry.voice_label,
                 "text": entry.text_preview,
                 "channel": entry.channel,
+                "session": entry.session,
                 "priority": entry.priority,
             })
 
@@ -859,6 +865,9 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
     channel = body.get("channel")
     if channel is not None and not isinstance(channel, str):
         return JSONResponse({"error": "Channel must be a string"}, status_code=400)
+    session = body.get("session")
+    if session is not None and not isinstance(session, str):
+        return JSONResponse({"error": "Session must be a string"}, status_code=400)
 
     vid = await resolve_voice_async(voice_raw)
     if not _api_key():
@@ -874,6 +883,7 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
         voice_label=voice_label(vid),
         created_at=time.time(),
         channel=channel or None,
+        session=session or None,
         priority=bool(body.get("priority", False)),
         full_text=text,
     )
@@ -914,6 +924,9 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
     channel = body.get("channel")
     if channel is not None and not isinstance(channel, str):
         return JSONResponse({"error": "Channel must be a string"}, status_code=400)
+    session = body.get("session")
+    if session is not None and not isinstance(session, str):
+        return JSONResponse({"error": "Session must be a string"}, status_code=400)
     if not _api_key():
         return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
 
@@ -954,6 +967,7 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
         entry_type="dialogue",
         dialogue_segments=segments,
         channel=channel or None,
+        session=session or None,
         priority=bool(body.get("priority", False)),
         full_text=full_dialogue,
     )
@@ -1116,6 +1130,7 @@ async def handle_history_replay(request: StarletteRequest) -> JSONResponse:
         created_at=time.time(),
         entry_type=entry_data.get("type", "speak"),
         channel=entry_data.get("channel"),
+        session=entry_data.get("session"),
         history_id=replay_id,
         is_replay=True,
     )
