@@ -1,12 +1,17 @@
 # /// script
 # requires-python = ">=3.12"
-# dependencies = ["starlette", "uvicorn"]
+# dependencies = ["starlette", "uvicorn", "edge-tts"]
 # ///
-"""ElevenLabs V3 TTS HTTP Daemon for Claude Code.
+"""TTS HTTP Daemon for Claude Code.
 
 Standalone Starlette+Uvicorn server replacing the MCP server.
 Provides REST API for TTS with audio queuing, multi-voice dialogue,
 channel-based queue management, pause/resume, and playback history.
+
+The synthesis engine is chosen by SPEAK_ENGINE: "edge" (default; Microsoft
+Edge neural voices, no API key) or "elevenlabs" (ElevenLabs V3, needs
+ELEVENLABS_API_KEY). Everything downstream of synthesis (queue, player,
+cache, history, SSE, dashboard) is engine-agnostic.
 
 Dashboard at http://127.0.0.1:7865
 
@@ -36,6 +41,7 @@ import collections
 import json
 import logging
 import os
+import re
 
 log = logging.getLogger("voice-daemon")
 import shutil
@@ -56,6 +62,7 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request as StarletteRequest
 from starlette.responses import HTMLResponse, FileResponse, JSONResponse, StreamingResponse
 from starlette.routing import Route
+import edge_tts
 import uvicorn
 
 def _is_local_origin(origin: str) -> bool:
@@ -127,13 +134,21 @@ def _load_dotenv():
         key, _, value = line.partition("=")
         key = key.strip()
         value = value.strip().strip("\"'")
-        os.environ.setdefault(key, value)
+        if value:  # an empty `KEY=` line (as in .env.example) means unset, not ""
+            os.environ.setdefault(key, value)
 
 
 _load_dotenv()
 
 DASHBOARD_PORT = int(os.environ.get("SPEAK_PORT", "7865"))
 CACHE_DIR = Path(os.environ.get("SPEAK_CACHE_DIR", str(REPO_ROOT / "cache")))
+
+ENGINES = ("edge", "elevenlabs")
+ENGINE = (os.environ.get("SPEAK_ENGINE") or "edge").strip().lower()
+if ENGINE not in ENGINES:
+    sys.exit(f"SPEAK_ENGINE must be one of {ENGINES}, got {ENGINE!r}")
+# Edge voice for names with no `edge` mapping in voices.json (and for no voice at all).
+EDGE_DEFAULT_VOICE = os.environ.get("EDGE_TTS_VOICE") or "en-IE-EmilyNeural"
 
 
 VOICES_PATH = REPO_ROOT / "voices.json"
@@ -169,17 +184,25 @@ def _load_voices() -> tuple[list[dict], dict[str, str], dict[str, str]]:
 
 
 VOICE_RECORDS, VOICE_ROSTER, VOICE_BY_NAME = _load_voices()
+EDGE_BY_ID: dict[str, str] = {}  # voices.json id -> Edge neural voice (the `edge` field)
 
 
 def _rebuild_voice_indexes():
     VOICE_ROSTER.clear()
     VOICE_BY_NAME.clear()
+    EDGE_BY_ID.clear()
     for rec in VOICE_RECORDS:
         name = rec.get("name")
         vid = rec.get("id")
         if isinstance(name, str) and isinstance(vid, str):
             VOICE_ROSTER[vid] = name
             VOICE_BY_NAME[name.lower()] = vid
+            edge = rec.get("edge")
+            if isinstance(edge, str) and edge:
+                EDGE_BY_ID[vid] = edge
+
+
+_rebuild_voice_indexes()
 
 
 def _save_voices():
@@ -276,14 +299,23 @@ async def resolve_voice_async(voice: str | None) -> str:
         return os.environ.get("ELEVENLABS_VOICE_ID", "")
     if voice.lower() in VOICE_BY_NAME:
         return VOICE_BY_NAME[voice.lower()]
-    api_voices = await asyncio.to_thread(_fetch_voices_from_api)
-    if voice.lower() in api_voices:
-        return api_voices[voice.lower()]
+    if ENGINE == "elevenlabs":
+        api_voices = await asyncio.to_thread(_fetch_voices_from_api)
+        if voice.lower() in api_voices:
+            return api_voices[voice.lower()]
     return voice
 
 
 def voice_label(voice_id: str) -> str:
-    return VOICE_ROSTER.get(voice_id, voice_id[:12])
+    if voice_id in VOICE_ROSTER:
+        return VOICE_ROSTER[voice_id]
+    if _is_edge_voice_name(voice_id):  # en-IE-EmilyNeural -> Emily
+        return voice_id.rsplit("-", 1)[1].removesuffix("Neural")
+    return voice_id[:12]
+
+
+def _is_edge_voice_name(s: str) -> bool:
+    return s.endswith("Neural") and "-" in s
 
 
 # --- SSE Broadcaster ---
@@ -426,6 +458,84 @@ def _fetch_dialogue(inputs: list[dict], retries: int = 2) -> str:
     with os.fdopen(fd, "wb") as f:
         f.write(data)
     return path
+
+
+# --- Edge TTS (async, no API key) ---
+
+_STAGE_TAG_RE = re.compile(r"\[[^\[\]]*\]")  # ElevenLabs V3 stage directions like [deadpan]
+
+
+def _edge_voice(voice_id: str) -> str:
+    """Edge voice for a voices.json id or a bare Edge voice name; anything else -> default."""
+    if voice_id in EDGE_BY_ID:
+        return EDGE_BY_ID[voice_id]
+    if _is_edge_voice_name(voice_id):
+        return voice_id
+    return EDGE_DEFAULT_VOICE
+
+
+async def _edge_synthesize(text: str, voice: str, retries: int = 1) -> str:
+    """Write one Edge MP3 to a temp file and return its path.
+
+    Edge has no notion of V3 stage directions, so bracketed tags are dropped rather
+    than read aloud. Edge also occasionally finishes cleanly with an empty or tiny
+    file, so the result is validated and retried once.
+    """
+    text = _STAGE_TAG_RE.sub("", text).strip() or text
+    for attempt in range(1 + retries):
+        fd, path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
+        os.close(fd)
+        try:
+            await edge_tts.Communicate(text, voice).save(path)
+            data = Path(path).read_bytes()
+        except Exception as exc:
+            data = b""
+            log.warning(f"Edge TTS attempt {attempt+1} ({voice}) raised: {exc}")
+        if len(data) > 1000 and _validate_mp3(data):
+            return path
+        log.warning(f"Edge TTS attempt {attempt+1} ({voice}): invalid audio ({len(data)} bytes)")
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
+        if attempt < retries:
+            await asyncio.sleep(1)
+    raise ValueError(f"Edge TTS produced no audio after {1+retries} attempts")
+
+
+async def _edge_dialogue(inputs: list[dict]) -> str:
+    """One MP3 for a multi-voice dialogue: each line in its own Edge voice, frames concatenated."""
+    parts: list[str] = []
+    try:
+        for line in inputs:
+            parts.append(await _edge_synthesize(line["text"], _edge_voice(line["voice_id"])))
+        fd, path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
+        with os.fdopen(fd, "wb") as out:
+            for part in parts:
+                out.write(Path(part).read_bytes())
+        return path
+    finally:
+        for part in parts:
+            try:
+                os.unlink(part)
+            except OSError:
+                pass
+
+
+# --- Engine dispatch ---
+
+async def synthesize_speech(text: str, voice_id: str) -> str:
+    """Temp MP3 path for one line via the configured engine."""
+    if ENGINE == "edge":
+        return await _edge_synthesize(text, _edge_voice(voice_id))
+    return await asyncio.to_thread(_fetch_tts, text, voice_id)
+
+
+async def synthesize_dialogue(inputs: list[dict]) -> str:
+    """Temp MP3 path for a multi-voice dialogue via the configured engine."""
+    if ENGINE == "edge":
+        return await _edge_dialogue(inputs)
+    return await asyncio.to_thread(_fetch_dialogue, inputs)
 
 
 # --- Audio Queue ---
@@ -834,7 +944,7 @@ def _clean_old_cache(cache_dir: Path, max_age_hours: int = 24):
     if not cache_dir.exists():
         return
     cutoff = time.time() - max_age_hours * 3600
-    for f in cache_dir.iterdir():
+    for f in cache_dir.glob("*.mp3"):
         if f.is_file() and f.stat().st_mtime < cutoff:
             try:
                 f.unlink()
@@ -870,10 +980,13 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
         return JSONResponse({"error": "Session must be a string"}, status_code=400)
 
     vid = await resolve_voice_async(voice_raw)
-    if not _api_key():
-        return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
-    if not vid:
-        return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
+    if ENGINE == "elevenlabs":
+        if not _api_key():
+            return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
+        if not vid:
+            return JSONResponse({"error": "No voice specified and ELEVENLABS_VOICE_ID not set"}, status_code=400)
+    elif not vid:
+        vid = EDGE_DEFAULT_VOICE
 
     entry_id = uuid.uuid4().hex[:8]
     entry = QueueEntry(
@@ -891,8 +1004,7 @@ async def handle_speak(request: StarletteRequest) -> JSONResponse:
 
     async def _fetch_bg():
         try:
-            path = await asyncio.to_thread(_fetch_tts, text, vid)
-            entry.audio_path = path
+            entry.audio_path = await synthesize_speech(text, vid)
         except Exception as exc:
             log.error(f"Background TTS fetch failed for {entry_id}: {exc}")
             entry.fetch_failed = True
@@ -927,7 +1039,7 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
     session = body.get("session")
     if session is not None and not isinstance(session, str):
         return JSONResponse({"error": "Session must be a string"}, status_code=400)
-    if not _api_key():
+    if ENGINE == "elevenlabs" and not _api_key():
         return JSONResponse({"error": "ELEVENLABS_API_KEY not set"}, status_code=500)
 
     inputs = []
@@ -943,7 +1055,7 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
             return JSONResponse({"error": f"Dialogue item {i} text too long"}, status_code=400)
         if voice is not None and not isinstance(voice, str):
             return JSONResponse({"error": f"Dialogue item {i} voice must be a string"}, status_code=400)
-        vid = await resolve_voice_async(voice)
+        vid = await resolve_voice_async(voice) or (EDGE_DEFAULT_VOICE if ENGINE == "edge" else "")
         if not vid:
             return JSONResponse({"error": f"Cannot resolve voice: {voice}"}, status_code=400)
         inputs.append({"voice_id": vid, "text": text})
@@ -975,8 +1087,7 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
 
     async def _fetch_bg():
         try:
-            path = await asyncio.to_thread(_fetch_dialogue, inputs)
-            entry.audio_path = path
+            entry.audio_path = await synthesize_dialogue(inputs)
         except Exception as exc:
             log.error(f"Background dialogue fetch failed for {entry_id}: {exc}")
             entry.fetch_failed = True
@@ -1172,6 +1283,7 @@ async def handle_health(request: StarletteRequest) -> JSONResponse:
     return JSONResponse({
         "status": "ok",
         "version": "2.0",
+        "engine": ENGINE,
         "queue_size": len(queue._deque) + (1 if queue._current else 0),
     })
 
@@ -1197,6 +1309,7 @@ def _serialize_voices() -> list[dict]:
             "color": rec.get("color", ""),
             "style": rec.get("style", ""),
             "kind": rec.get("kind", "default"),
+            "edge": rec.get("edge", ""),
             "portraits": portraits,
             "has_portrait": portraits["default"],
         })
@@ -1229,6 +1342,7 @@ async def handle_voices_create(request: StarletteRequest) -> JSONResponse:
     color = body.get("color", "")
     style = body.get("style", "")
     kind = body.get("kind", "default")
+    edge = body.get("edge", "")
 
     if not isinstance(name, str) or not name.strip():
         return JSONResponse({"error": "name is required"}, status_code=400)
@@ -1240,6 +1354,8 @@ async def handle_voices_create(request: StarletteRequest) -> JSONResponse:
         return JSONResponse({"error": "style must be a string"}, status_code=400)
     if not isinstance(kind, str):
         return JSONResponse({"error": "kind must be a string"}, status_code=400)
+    if not isinstance(edge, str):
+        return JSONResponse({"error": "edge must be a string"}, status_code=400)
 
     name = name.strip()
     if _find_voice_index(name) != -1:
@@ -1252,6 +1368,8 @@ async def handle_voices_create(request: StarletteRequest) -> JSONResponse:
         "style": style,
         "kind": kind or "default",
     }
+    if edge.strip():
+        record["edge"] = edge.strip()
     VOICE_RECORDS.append(record)
     try:
         await asyncio.to_thread(_save_voices)
@@ -1267,6 +1385,7 @@ async def handle_voices_create(request: StarletteRequest) -> JSONResponse:
         "color": record["color"],
         "style": record["style"],
         "kind": record["kind"],
+        "edge": record.get("edge", ""),
         "has_portrait": _has_portrait(name),
     }, status_code=201)
 
@@ -1300,7 +1419,7 @@ async def handle_voices_update(request: StarletteRequest) -> JSONResponse:
         new_name = nn
         record["name"] = nn
 
-    for field_name in ("id", "color", "style", "kind"):
+    for field_name in ("id", "color", "style", "kind", "edge"):
         if field_name in body:
             val = body[field_name]
             if not isinstance(val, str):
@@ -1324,6 +1443,7 @@ async def handle_voices_update(request: StarletteRequest) -> JSONResponse:
         "color": record.get("color", ""),
         "style": record.get("style", ""),
         "kind": record.get("kind", "default"),
+        "edge": record.get("edge", ""),
         "has_portrait": _has_portrait(new_name),
     })
 
@@ -1420,6 +1540,8 @@ async def main():
             except Exception as e:
                 log.warning(f"Cache cleanup error: {e}")
 
+    log.info(f"TTS engine: {ENGINE}"
+             + (f" (default Edge voice {EDGE_DEFAULT_VOICE})" if ENGINE == "edge" else ""))
     broadcaster = SSEBroadcaster()
     queue = AudioQueue(broadcaster)
     queue.start()
@@ -1452,10 +1574,14 @@ async def main():
     config = uvicorn.Config(
         app, host="127.0.0.1", port=DASHBOARD_PORT,
         log_level="info",
+        # Dashboards hold /events (SSE) open for their lifetime; without a bound,
+        # SIGTERM releases the port but the process waits on them forever.
+        timeout_graceful_shutdown=3,
     )
     server = uvicorn.Server(config)
     await server.serve()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO, format="%(levelname)s:     %(message)s")
     asyncio.run(main())

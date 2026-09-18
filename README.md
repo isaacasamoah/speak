@@ -1,6 +1,6 @@
-# Speak — ElevenLabs TTS Skill for Claude Code
+# Speak — TTS Skill for Claude Code
 
-Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audio daemon with queuing, a web dashboard with animated portraits, and a simple CLI.
+Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audio daemon with queuing, a web dashboard with animated portraits, and a simple CLI. Synthesis runs on Microsoft Edge TTS by default (free, no API key) or ElevenLabs V3 (`SPEAK_ENGINE=elevenlabs`).
 
 ## 🚀 5-Minute Quickstart
 
@@ -12,13 +12,12 @@ Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audi
 brew install ffmpeg
 curl -LsSf https://astral.sh/uv/install.sh | sh
 
-# 2. Configure API key
+# 2. Configure (Edge TTS is the default and needs no key;
+#    for ElevenLabs set SPEAK_ENGINE=elevenlabs and ELEVENLABS_API_KEY=sk_your_key)
 cp .env.example .env
-# Edit .env and add: ELEVENLABS_API_KEY=sk_your_key
 
-# 3. Start daemon
-unset SPEAK_PORT  # Prevent crash from empty env vars
-uv run daemon/server.py
+# 3. Start daemon (detached; uv, or the repo .venv python)
+scripts/daemon-start.sh
 
 # 4. Test (in new terminal)
 ./scripts/say.sh "Hello, world!"
@@ -34,12 +33,12 @@ Dashboard at **http://127.0.0.1:7865**
 git clone <your-repo-url> speak
 cd speak
 
-# Configure
+# Configure (defaults to Edge TTS; edit .env for ElevenLabs)
 cp .env.example .env
-# Edit .env — add your ELEVENLABS_API_KEY
 
-# Start the daemon
-uv run daemon/server.py
+# Start / stop the daemon
+scripts/daemon-start.sh
+scripts/daemon-stop.sh
 
 # Speak from any terminal
 ./scripts/say.sh "Hello, world!"
@@ -53,14 +52,16 @@ Dashboard at **http://127.0.0.1:7865**
 - **Python >= 3.12**
 - **[uv](https://docs.astral.sh/uv/)** (runs the daemon with inline deps — no venv needed)
 - **ffmpeg** (`brew install ffmpeg` / `dnf install ffmpeg`) — playback (Linux), duration, envelope extraction, seeking
-- **ElevenLabs API key** — [get one here](https://elevenlabs.io)
+- **ElevenLabs API key** — only for `SPEAK_ENGINE=elevenlabs` ([get one here](https://elevenlabs.io)); the default Edge engine needs none
 
 ## Configuration
 
 ### `.env`
 
 ```bash
-ELEVENLABS_API_KEY=your_key_here   # Required
+SPEAK_ENGINE=edge                  # edge (default, no key) or elevenlabs
+EDGE_TTS_VOICE=                    # Edge fallback voice (default en-IE-EmilyNeural)
+ELEVENLABS_API_KEY=your_key_here   # Required only for SPEAK_ENGINE=elevenlabs
 ELEVENLABS_VOICE_ID=               # Default voice (optional, defaults to Claude)
 SPEAK_CACHE_DIR=                   # Cache dir (default: ./cache)
 SPEAK_PORT=                        # HTTP port (default: 7865)
@@ -70,18 +71,19 @@ Real environment variables always override `.env` values.
 
 ### `voices.json`
 
-Ships with 9 voices. Add your own ElevenLabs voices:
+Each voice carries an ElevenLabs `id` and an Edge neural voice (`edge`). Add your own:
 
 ```json
 {
   "name": "MyVoice",
   "id": "your-elevenlabs-voice-id",
+  "edge": "en-GB-RyanNeural",
   "color": "#ff6600",
   "style": "Brief description"
 }
 ```
 
-The daemon also falls back to the ElevenLabs API for voice names not in `voices.json`.
+With the Edge engine, names without an `edge` mapping use `EDGE_TTS_VOICE` (default `en-IE-EmilyNeural`); list Edge voices with `edge-tts --list-voices`. With the ElevenLabs engine, names not in `voices.json` are looked up on the ElevenLabs API.
 
 ## Usage
 
@@ -142,7 +144,8 @@ Assign each agent a unique voice for audio differentiation:
 
 ```
 speak/
-  daemon/server.py       Starlette HTTP server — TTS, queue, SSE, dashboard
+  daemon/server.py       Starlette HTTP server — TTS (Edge or ElevenLabs), queue, SSE, dashboard
+  scripts/daemon-start.sh  Start the daemon detached (idempotent); daemon-stop.sh stops it
   scripts/say.sh         CLI wrapper — talks to daemon, falls back to speak.py
   scripts/speak.py       Standalone TTS (no daemon needed)
   dashboard/index.html   Single-file web dashboard

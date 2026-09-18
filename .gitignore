@@ -3,3 +3,6 @@ cache/*.mp3
 __pycache__/
 *.pyc
 .DS_Store
+daemon.log
+daemon.pid
+.venv/

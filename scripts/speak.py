@@ -192,6 +192,9 @@ def speak_elevenlabs(text, api_key, voice_id, model=DEFAULT_MODEL, sync=False):
 
 def _fallback_tts_cmd(text):
     """Platform speech synthesizer command, or None if unavailable."""
+    edge_say = os.path.join(os.path.dirname(os.path.abspath(__file__)), "edge-say.sh")
+    if os.path.exists(edge_say) and os.access(edge_say, os.X_OK):
+        return [edge_say, text]
     if sys.platform == "darwin":
         return ["say", text]
     if shutil.which("spd-say"):

@@ -4,90 +4,103 @@
     "id": "wmDFUxdGXYF3Bb9LHOfc",
     "color": "#f0883e",
     "style": "The forge's own voice — Cortana-inspired companion AI: warm, brilliant, confident, faintly synthetic, a wry spark beneath the precision. Decisions + critical surfaces only.",
-    "kind": "forge"
+    "kind": "forge",
+    "edge": "en-US-AriaNeural"
   },
   {
     "name": "Claude",
     "id": "ufd1qDyw7e2Y1tmhnlkm",
     "color": "#58a6ff",
     "style": "Cool, precise feminine AI — crystalline, deliberate, faintly amused",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-GB-SoniaNeural"
   },
   {
     "name": "Rachel",
     "id": "21m00Tcm4TlvDq8ikWAM",
     "color": "#58a6ff",
     "style": "Calm, clear, professional female",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-JennyNeural"
   },
   {
     "name": "Adam",
     "id": "pNInz6obpgDQGcFmaJgB",
     "color": "#f0883e",
     "style": "Deep, warm, authoritative male",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-ChristopherNeural"
   },
   {
     "name": "Antoni",
     "id": "ErXwobaYiN019PkySvjV",
     "color": "#3fb950",
     "style": "Friendly, conversational male",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-BrianNeural"
   },
   {
     "name": "Josh",
     "id": "TxGEqnHWrfWFTfGW9XjX",
     "color": "#bc8cff",
     "style": "Deep, resonant, confident male",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-AndrewNeural"
   },
   {
     "name": "Bella",
     "id": "EXAVITQu4vr4xnSDxMaL",
     "color": "#f778ba",
     "style": "Soft, warm, approachable female",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-AvaNeural"
   },
   {
     "name": "Charlotte",
     "id": "XB0fDUnXU5powFXDhCwa",
     "color": "#d29922",
     "style": "Warm, slightly accented female",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-GB-LibbyNeural"
   },
   {
     "name": "Elli",
     "id": "MF3mGyEYCl7XYWbV9V6O",
     "color": "#39d2c0",
     "style": "Young, energetic female",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-EmmaNeural"
   },
   {
     "name": "Dorothy",
     "id": "ThT5KcBeYPX3keUQqHPh",
     "color": "#da3633",
     "style": "Clear, pleasant, steady female",
-    "kind": "default"
+    "kind": "default",
+    "edge": "en-US-MichelleNeural"
   },
   {
     "name": "Codex",
     "id": "KlKng817U95XYtfP1Vtl",
     "color": "#3f0c80",
     "style": "Low, calm, precise AI — clipped, pragmatic, dryly understated",
-    "kind": "codex"
+    "kind": "codex",
+    "edge": "en-US-EricNeural"
   },
   {
     "name": "Wren",
     "id": "Fj0YmcQlAAKaZVdHmuI3",
     "color": "#7a8b6e",
     "style": "soft Irish-accented late-twenties voice, calm + attentive, steady warm cadence, careful colleague feel",
-    "kind": "user"
+    "kind": "user",
+    "edge": "en-IE-EmilyNeural"
   },
   {
     "name": "Jeremy",
     "id": "TboyitrYav748TAHbt1c",
     "color": "#bb74ff",
     "style": "Jeremy is a french cheese afficiondo who moonlights as a plain spoken tech lead",
-    "kind": "default"
+    "kind": "default",
+    "edge": "fr-FR-RemyMultilingualNeural"
   }
 ]

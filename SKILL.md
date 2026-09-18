@@ -1,6 +1,6 @@
 ---
 name: speak
-description: Speak text aloud via ElevenLabs TTS. Voice is the primary communication channel. Audio queues sequentially across all agents.
+description: Speak text aloud via the voice daemon (Edge TTS by default, ElevenLabs optional). Voice is the primary communication channel. Audio queues sequentially across all agents.
 allowed-tools: Bash, Read
 ---
 
@@ -67,6 +67,7 @@ Every spoken line is attributed on the dashboards as a stack: **voice → sessio
 ## Audio Tags
 
 ElevenLabs V3 supports freeform expressive tags in brackets. These direct **how** the voice performs — not what sounds it makes.
+With the default Edge engine (`SPEAK_ENGINE=edge`) bracketed tags are stripped before synthesis, so they are harmless but do nothing.
 
 **Works well:**
 - Emotions & delivery: `[excited]` `[deadpan]` `[sarcastically]` `[conspiratorial]` `[smug]`
@@ -91,7 +92,7 @@ Default assistant voice is **Claude**. The full roster is dynamic — query the 
 curl -s http://127.0.0.1:7865/voices
 ```
 
-Each record has `name`, `id`, `color`, `style`, `kind`, and `has_portrait`. Pick a voice whose `style` description matches your role (e.g. a precise debugging agent → crystalline/deliberate; an exploration agent → young/energetic).
+Each record has `name`, `id` (ElevenLabs), `edge` (Edge neural voice), `color`, `style`, `kind`, and `has_portrait`. Pick a voice whose `style` description matches your role (e.g. a precise debugging agent → crystalline/deliberate; an exploration agent → young/energetic).
 
 **Selection order:**
 1. User-requested voice (if specified)
