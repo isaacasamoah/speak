@@ -1,6 +1,6 @@
 # Speak — TTS Skill for Claude Code
 
-Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audio daemon with queuing, a web dashboard with animated portraits, and a simple CLI. Synthesis runs on Microsoft Edge TTS by default (free, no API key) or ElevenLabs V3 (`SPEAK_ENGINE=elevenlabs`).
+Text-to-speech skill that gives Claude Code a voice. Includes a multi-voice audio daemon with queuing, a web dashboard with animated portraits, and a simple CLI. Synthesis runs on Microsoft Edge TTS by default (free, no API key) ElevenLabs V3 (`SPEAK_ENGINE=elevenlabs`), or cloned voices from the local [VoiceStudio](https://github.com/debpalash/VoiceStudio) app (`SPEAK_ENGINE=voicestudio`).
 
 ## 🚀 5-Minute Quickstart
 
@@ -59,7 +59,7 @@ Dashboard at **http://127.0.0.1:7865**
 ### `.env`
 
 ```bash
-SPEAK_ENGINE=edge                  # edge (default, no key) or elevenlabs
+SPEAK_ENGINE=edge                  # edge (default, no key), elevenlabs or voicestudio
 EDGE_TTS_VOICE=                    # Edge fallback voice (default en-IE-EmilyNeural)
 ELEVENLABS_API_KEY=your_key_here   # Required only for SPEAK_ENGINE=elevenlabs
 ELEVENLABS_VOICE_ID=               # Default voice (optional, defaults to Claude)
@@ -84,6 +84,8 @@ Each voice carries an ElevenLabs `id` and an Edge neural voice (`edge`). Add you
 ```
 
 With the Edge engine, names without an `edge` mapping use `EDGE_TTS_VOICE` (default `en-IE-EmilyNeural`); list Edge voices with `edge-tts --list-voices`. With the ElevenLabs engine, names not in `voices.json` are looked up on the ElevenLabs API.
+
+With the VoiceStudio engine, a voice speaks through the app when its record carries a `voicestudio` field holding a VoiceStudio voice profile id (from `GET http://127.0.0.1:3900/profiles`); every other voice, and any line the app cannot render, speaks through Edge. The app must be open for its API on port 3900 to answer. `VOICESTUDIO_STEPS` sets quality against speed (default 32, full quality; 8 is about three times faster).
 
 ## Usage
 

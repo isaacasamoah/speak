@@ -9,8 +9,10 @@ Provides REST API for TTS with audio queuing, multi-voice dialogue,
 channel-based queue management, pause/resume, and playback history.
 
 The synthesis engine is chosen by SPEAK_ENGINE: "edge" (default; Microsoft
-Edge neural voices, no API key) or "elevenlabs" (ElevenLabs V3, needs
-ELEVENLABS_API_KEY). Everything downstream of synthesis (queue, player,
+Edge neural voices, no API key), "elevenlabs" (ElevenLabs V3, needs
+ELEVENLABS_API_KEY) or "voicestudio" (the local VoiceStudio app's cloned
+voices; a voice without a `voicestudio` profile in voices.json speaks through
+Edge). Everything downstream of synthesis (queue, player,
 cache, history, SSE, dashboard) is engine-agnostic.
 
 Dashboard at http://127.0.0.1:7865
@@ -143,12 +145,15 @@ _load_dotenv()
 DASHBOARD_PORT = int(os.environ.get("SPEAK_PORT", "7865"))
 CACHE_DIR = Path(os.environ.get("SPEAK_CACHE_DIR", str(REPO_ROOT / "cache")))
 
-ENGINES = ("edge", "elevenlabs")
+ENGINES = ("edge", "elevenlabs", "voicestudio")
 ENGINE = (os.environ.get("SPEAK_ENGINE") or "edge").strip().lower()
 if ENGINE not in ENGINES:
     sys.exit(f"SPEAK_ENGINE must be one of {ENGINES}, got {ENGINE!r}")
 # Edge voice for names with no `edge` mapping in voices.json (and for no voice at all).
 EDGE_DEFAULT_VOICE = os.environ.get("EDGE_TTS_VOICE") or "en-IE-EmilyNeural"
+# VoiceStudio's local API and its diffusion step count (32 is the model's full quality).
+VOICESTUDIO_URL = (os.environ.get("VOICESTUDIO_URL") or "http://127.0.0.1:3900").rstrip("/")
+VOICESTUDIO_STEPS = int(os.environ.get("VOICESTUDIO_STEPS") or "32")
 
 
 VOICES_PATH = REPO_ROOT / "voices.json"
@@ -185,12 +190,14 @@ def _load_voices() -> tuple[list[dict], dict[str, str], dict[str, str]]:
 
 VOICE_RECORDS, VOICE_ROSTER, VOICE_BY_NAME = _load_voices()
 EDGE_BY_ID: dict[str, str] = {}  # voices.json id -> Edge neural voice (the `edge` field)
+VOICESTUDIO_BY_ID: dict[str, str] = {}  # voices.json id -> VoiceStudio profile id (the `voicestudio` field)
 
 
 def _rebuild_voice_indexes():
     VOICE_ROSTER.clear()
     VOICE_BY_NAME.clear()
     EDGE_BY_ID.clear()
+    VOICESTUDIO_BY_ID.clear()
     for rec in VOICE_RECORDS:
         name = rec.get("name")
         vid = rec.get("id")
@@ -200,6 +207,9 @@ def _rebuild_voice_indexes():
             edge = rec.get("edge")
             if isinstance(edge, str) and edge:
                 EDGE_BY_ID[vid] = edge
+            profile = rec.get("voicestudio")
+            if isinstance(profile, str) and profile:
+                VOICESTUDIO_BY_ID[vid] = profile
 
 
 _rebuild_voice_indexes()
@@ -503,12 +513,50 @@ async def _edge_synthesize(text: str, voice: str, retries: int = 1) -> str:
     raise ValueError(f"Edge TTS produced no audio after {1+retries} attempts")
 
 
-async def _edge_dialogue(inputs: list[dict]) -> str:
-    """One MP3 for a multi-voice dialogue: each line in its own Edge voice, frames concatenated."""
+# --- VoiceStudio (local app, cloned voices) ---
+
+def _voicestudio_synthesize(text: str, profile: str) -> str:
+    """Write one MP3 from VoiceStudio's OpenAI-style speech endpoint and return its path.
+
+    Bracketed V3 stage directions are dropped, as for Edge. The timeout allows a
+    long line at full quality while the app is still loading its model.
+    """
+    text = _STAGE_TAG_RE.sub("", text).strip() or text
+    payload = json.dumps({"input": text, "voice": profile, "num_step": VOICESTUDIO_STEPS,
+                          "response_format": "mp3"}).encode()
+    req = Request(f"{VOICESTUDIO_URL}/v1/audio/speech", data=payload,
+                  headers={"Content-Type": "application/json"})
+    with urlopen(req, timeout=180) as resp:
+        data = resp.read()
+    if not _validate_mp3(data):
+        raise ValueError(f"VoiceStudio returned invalid audio ({len(data)} bytes)")
+    fd, path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
+    with os.fdopen(fd, "wb") as f:
+        f.write(data)
+    return path
+
+
+async def _line_synthesize(text: str, voice_id: str) -> str:
+    """Temp MP3 for one line under the edge or voicestudio engine.
+
+    Under voicestudio a voice with a VoiceStudio profile speaks through the app;
+    any other voice, or a line the app cannot render (app closed, model error),
+    speaks through Edge so the bench is never silent.
+    """
+    if ENGINE == "voicestudio" and voice_id in VOICESTUDIO_BY_ID:
+        try:
+            return await asyncio.to_thread(_voicestudio_synthesize, text, VOICESTUDIO_BY_ID[voice_id])
+        except Exception as exc:
+            log.warning(f"VoiceStudio ({voice_label(voice_id)}) failed, speaking through Edge: {exc}")
+    return await _edge_synthesize(text, _edge_voice(voice_id))
+
+
+async def _lines_dialogue(inputs: list[dict]) -> str:
+    """One MP3 for a multi-voice dialogue: each line synthesized on its own, frames concatenated."""
     parts: list[str] = []
     try:
         for line in inputs:
-            parts.append(await _edge_synthesize(line["text"], _edge_voice(line["voice_id"])))
+            parts.append(await _line_synthesize(line["text"], line["voice_id"]))
         fd, path = tempfile.mkstemp(prefix=TEMP_PREFIX, suffix=".mp3")
         with os.fdopen(fd, "wb") as out:
             for part in parts:
@@ -526,15 +574,15 @@ async def _edge_dialogue(inputs: list[dict]) -> str:
 
 async def synthesize_speech(text: str, voice_id: str) -> str:
     """Temp MP3 path for one line via the configured engine."""
-    if ENGINE == "edge":
-        return await _edge_synthesize(text, _edge_voice(voice_id))
+    if ENGINE in ("edge", "voicestudio"):
+        return await _line_synthesize(text, voice_id)
     return await asyncio.to_thread(_fetch_tts, text, voice_id)
 
 
 async def synthesize_dialogue(inputs: list[dict]) -> str:
     """Temp MP3 path for a multi-voice dialogue via the configured engine."""
-    if ENGINE == "edge":
-        return await _edge_dialogue(inputs)
+    if ENGINE in ("edge", "voicestudio"):
+        return await _lines_dialogue(inputs)
     return await asyncio.to_thread(_fetch_dialogue, inputs)
 
 
@@ -1055,7 +1103,7 @@ async def handle_speak_dialogue(request: StarletteRequest) -> JSONResponse:
             return JSONResponse({"error": f"Dialogue item {i} text too long"}, status_code=400)
         if voice is not None and not isinstance(voice, str):
             return JSONResponse({"error": f"Dialogue item {i} voice must be a string"}, status_code=400)
-        vid = await resolve_voice_async(voice) or (EDGE_DEFAULT_VOICE if ENGINE == "edge" else "")
+        vid = await resolve_voice_async(voice) or (EDGE_DEFAULT_VOICE if ENGINE != "elevenlabs" else "")
         if not vid:
             return JSONResponse({"error": f"Cannot resolve voice: {voice}"}, status_code=400)
         inputs.append({"voice_id": vid, "text": text})
@@ -1541,7 +1589,10 @@ async def main():
                 log.warning(f"Cache cleanup error: {e}")
 
     log.info(f"TTS engine: {ENGINE}"
-             + (f" (default Edge voice {EDGE_DEFAULT_VOICE})" if ENGINE == "edge" else ""))
+             + (f" (default Edge voice {EDGE_DEFAULT_VOICE})" if ENGINE == "edge" else "")
+             + (f" ({VOICESTUDIO_URL}, {VOICESTUDIO_STEPS} steps; profiles for "
+                f"{', '.join(voice_label(v) for v in VOICESTUDIO_BY_ID) or 'no voices'})"
+                if ENGINE == "voicestudio" else ""))
     broadcaster = SSEBroadcaster()
     queue = AudioQueue(broadcaster)
     queue.start()
