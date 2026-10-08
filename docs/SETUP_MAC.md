@@ -20,17 +20,23 @@ which afplay afinfo say
 
 ## Setup Steps
 
-### 1. Get ElevenLabs API Key
+### 1. Choose an engine
+
+The default engine is Microsoft Edge TTS: free, no account, no key. If that is
+what you want, `cp .env.example .env` and skip to step 3.
+
+For ElevenLabs instead, set `SPEAK_ENGINE=elevenlabs` in `.env` and get a key:
 
 1. Sign up at https://elevenlabs.io (free tier: 10,000 chars/month)
 2. Go to https://elevenlabs.io/app/settings/api-keys
 3. Create new API key (starts with `sk_`)
 
-### 2. Configure Environment
+### 2. Configure Environment (ElevenLabs only)
 
 ```bash
 # Create .env file
 cat > .env << 'EOF'
+SPEAK_ENGINE=elevenlabs
 ELEVENLABS_API_KEY=<YOUR_API_KEY>
 EOF
 
@@ -41,9 +47,14 @@ unset SPEAK_PORT SPEAK_CACHE_DIR ELEVENLABS_VOICE_ID
 ### 3. Start Daemon
 
 ```bash
-# Start server (runs on http://127.0.0.1:7865)
+# Detached, idempotent, logs to daemon.log (uses uv if installed, else .venv/bin/python)
+scripts/daemon-start.sh
+
+# Or in the foreground (runs on http://127.0.0.1:7865)
 ~/.local/bin/uv run daemon/server.py
 ```
+
+Stop a detached daemon with `scripts/daemon-stop.sh`.
 
 **Expected output:**
 ```
@@ -101,7 +112,7 @@ unset SPEAK_PORT SPEAK_CACHE_DIR ELEVENLABS_VOICE_ID
 
 ### 2. `HTTP Error 401: Unauthorized`
 
-**Cause:** Invalid API key.
+**Cause:** Invalid API key (ElevenLabs engine only).
 
 **Fix:** Verify your API key works:
 ```bash
